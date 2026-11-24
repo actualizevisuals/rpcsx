@@ -66,6 +66,13 @@ void VKFragmentDecompilerThread::insertInputs(std::stringstream& OS)
 		{.two_sided_color = !!(properties.in_register_mask & in_diff_color),
 			.two_sided_specular = !!(properties.in_register_mask & in_spec_color)},
 		vk::get_varying_register_location);
+
+	if (device_props.emulate_clip_distance)
+	{
+		// Written by the vertex shader in place of gl_ClipDistance (see VKVertexProgram.cpp)
+		OS << "layout(location=" << vk::emulated_clip_distance_location0 << ") in vec4 _emu_clip_dist0;\n";
+		OS << "layout(location=" << vk::emulated_clip_distance_location1 << ") in vec4 _emu_clip_dist1;\n\n";
+	}
 }
 
 void VKFragmentDecompilerThread::insertOutputs(std::stringstream& OS)
@@ -340,6 +347,15 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream& OS)
 	OS << "void main()\n";
 	OS << "{\n";
 
+	if (device_props.emulate_clip_distance)
+	{
+		// Per-fragment user clip planes: drop what hardware clipping would have removed
+		OS << "	if (any(lessThan(_emu_clip_dist0, vec4(0.))) || any(lessThan(_emu_clip_dist1.xy, vec2(0.))))\n";
+		OS << "	{\n";
+		OS << "		discard;\n";
+		OS << "	}\n\n";
+	}
+
 	::glsl::insert_rop_init(OS);
 
 	OS << "\n"
@@ -395,6 +411,7 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	}
 
 	decompiler.device_props.emulate_depth_compare = !pdev->get_formats_support().d24_unorm_s8;
+	decompiler.device_props.emulate_clip_distance = vk::emulate_clip_distance();
 	decompiler.device_props.has_low_precision_rounding = vk::is_NVIDIA(vk::get_driver_vendor());
 	decompiler.Task();
 

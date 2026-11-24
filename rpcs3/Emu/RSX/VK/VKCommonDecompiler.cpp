@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "VKCommonDecompiler.h"
+#include "vkutils/device.h"
 
 namespace vk
 {
@@ -20,6 +21,11 @@ namespace vk
 			{"spec_color1", 13},
 			{"fog_c", 14},
 			{"fogc", 14}}};
+
+	bool emulate_clip_distance()
+	{
+		return !vk::g_render_device->get_clip_distance_support();
+	}
 
 	int get_varying_register_location(std::string_view varying_register_name)
 	{

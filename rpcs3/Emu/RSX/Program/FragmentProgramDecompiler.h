@@ -199,6 +199,7 @@ public:
 	{
 		bool has_native_half_support = false;
 		bool emulate_depth_compare = false;
+		bool emulate_clip_distance = false; // Discard per-fragment when the host lacks shaderClipDistance
 		bool has_low_precision_rounding = false;
 	} device_props;
 

@@ -1,0 +1,108 @@
+# Builds the Android core for PS3 Mobile (arm64 only) and publishes it as a
+# release of this fork, so the app can install it as a custom core or use this
+# repository as its core download channel.
+name: PS3 Mobile Android core
+
+on:
+  push:
+    branches: [ps3-mobile]
+    paths-ignore: ["**/*.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ps3-mobile-android
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            arch: armv8-a
+
+    env:
+      NDK_VERSION: "29.0.13113456"
+      CMAKE_VERSION: "3.31.6"
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk /usr/local/.ghcup || true
+        df -h /
+
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: 17
+
+    - name: Install Ninja and ccache
+      run: |
+        sudo apt update
+        sudo apt install -y ninja-build ccache
+
+    - name: Restore ccache
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-android-${{ matrix.arch }}-${{ github.sha }}
+        restore-keys: ccache-android-${{ matrix.arch }}-
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install packages
+      run: yes | sdkmanager "cmake;${{ env.CMAKE_VERSION }}" "ndk;${{ env.NDK_VERSION }}"
+
+    - name: Configure
+      run: |
+        $ANDROID_SDK_ROOT/cmake/${{ env.CMAKE_VERSION }}/bin/cmake \
+        -B build -S android -DANDROID_ABI=${{ matrix.abi }} \
+        -DUSE_ARCH=${{ matrix.arch }} \
+        -DANDROID_PLATFORM=android-29 \
+        -DANDROID_NDK=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }} \
+        -DCMAKE_TOOLCHAIN_FILE=$ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/build/cmake/android.toolchain.cmake \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_BUILD_TYPE=Release -G Ninja
+
+        RX_VERSION=`cat android/.rx.version | awk -F'-' '{print $1}'`
+        echo "RX_VERSION=$RX_VERSION" >> "$GITHUB_ENV"
+        echo "RX_SHA=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+
+    - name: Build
+      run: |
+        $ANDROID_SDK_ROOT/cmake/${{ env.CMAKE_VERSION }}/bin/cmake --build build
+        $ANDROID_SDK_ROOT/ndk/${{ env.NDK_VERSION }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip build/librpcsx-android.so
+        mv build/librpcsx-android.so librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}
+        path: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
+        if-no-files-found: error
+
+    - name: Publish release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}-mobile
+        name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}-mobile
+        make_latest: true
+        files: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
+        body: |
+          PS3 Mobile core build of ${{ github.sha }}.
+          Emulates user clip planes on GPUs without shaderClipDistance (e.g. ARM Mali).

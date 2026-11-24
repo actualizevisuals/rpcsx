@@ -20,6 +20,7 @@ struct VKVertexDecompilerThread : public VertexProgramDecompiler
 	struct
 	{
 		bool emulate_conditional_rendering{false};
+		bool emulate_clip_distance{false};
 	} m_device_props;
 
 protected:

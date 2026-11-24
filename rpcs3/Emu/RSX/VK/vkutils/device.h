@@ -210,6 +210,10 @@ namespace vk
 		{
 			return pgpu->features.depthBounds != VK_FALSE;
 		}
+		bool get_clip_distance_support() const
+		{
+			return pgpu->features.shaderClipDistance != VK_FALSE;
+		}
 		bool get_alpha_to_one_support() const
 		{
 			return pgpu->features.alphaToOne != VK_FALSE;

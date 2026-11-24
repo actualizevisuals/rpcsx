@@ -229,6 +229,29 @@ void VKVertexDecompilerThread::insertOutputs(std::stringstream& OS, const std::v
 			OS << "layout(location=" << vk::get_varying_register_location(i.name) << ") out vec4 " << i.name << ";\n";
 		}
 	}
+
+	if (m_device_props.emulate_clip_distance)
+	{
+		// The fragment shader discards on negative values (see VKFragmentProgram.cpp)
+		OS << "layout(location=" << vk::emulated_clip_distance_location0 << ") out vec4 _emu_clip_dist0;\n";
+		OS << "layout(location=" << vk::emulated_clip_distance_location1 << ") out vec4 _emu_clip_dist1;\n";
+	}
+}
+
+// Maps gl_ClipDistance[n] to the emulated clip distance varyings when the host lacks support.
+static std::string clip_output_name(const std::string& name, bool emulate)
+{
+	static constexpr std::string_view prefix = "gl_ClipDistance[";
+	if (!emulate || !name.starts_with(prefix))
+	{
+		return name;
+	}
+
+	const int index = name[prefix.size()] - '0';
+	static constexpr const char* targets[] = {
+		"_emu_clip_dist0.x", "_emu_clip_dist0.y", "_emu_clip_dist0.z", "_emu_clip_dist0.w",
+		"_emu_clip_dist1.x", "_emu_clip_dist1.y"};
+	return targets[index];
 }
 
 void VKVertexDecompilerThread::insertMainStart(std::stringstream& OS)
@@ -320,8 +343,16 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream& OS)
 
 	OS << "	vs_main();\n\n";
 
+	if (m_device_props.emulate_clip_distance)
+	{
+		// Positive = not clipped. Planes the program doesn't output stay disabled.
+		OS << "	_emu_clip_dist0 = vec4(1.);\n";
+		OS << "	_emu_clip_dist1 = vec4(1.);\n\n";
+	}
+
 	for (auto& i : reg_table)
 	{
+		const std::string out_name = clip_output_name(i.name, m_device_props.emulate_clip_distance);
 		if (!i.check_mask || i.test(rsx_vertex_program.output_mask))
 		{
 			if (m_parr.HasParam(PF_PARAM_OUT, "vec4", i.src_reg))
@@ -332,12 +363,12 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream& OS)
 				{
 					if (!condition.empty())
 						condition = "if " + condition;
-					OS << "	" << condition << i.name << " = " << i.src_reg << i.src_reg_mask << ";\n";
+					OS << "	" << condition << out_name << " = " << i.src_reg << i.src_reg_mask << ";\n";
 				}
 				else
 				{
 					// Insert if-else condition
-					OS << "	" << i.name << " = " << condition << "? " << i.src_reg << i.src_reg_mask << ": " << i.default_val << ";\n";
+					OS << "	" << out_name << " = " << condition << "? " << i.src_reg << i.src_reg_mask << ": " << i.default_val << ";\n";
 				}
 
 				// Register was marked for output and a properly initialized source register exists
@@ -365,6 +396,7 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream& OS)
 void VKVertexDecompilerThread::Task()
 {
 	m_device_props.emulate_conditional_rendering = vk::emulate_conditional_rendering();
+	m_device_props.emulate_clip_distance = vk::emulate_clip_distance();
 	m_binding_table = vk::g_render_device->get_pipeline_binding_table();
 
 	m_shader = Decompile();
