@@ -79,9 +79,12 @@ jobs:
         -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_BUILD_TYPE=Release -G Ninja
 
+        # Same version naming as upstream releases: the app compares the
+        # release name with the core's own version string.
         RX_VERSION=`cat android/.rx.version | awk -F'-' '{print $1}'`
+        RX_SHA=`cat android/.rx.version | awk -F'-' '{print $5}'`
         echo "RX_VERSION=$RX_VERSION" >> "$GITHUB_ENV"
-        echo "RX_SHA=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+        echo "RX_SHA=$RX_SHA" >> "$GITHUB_ENV"
 
     - name: Build
       run: |
@@ -99,8 +102,8 @@ jobs:
     - name: Publish release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}-mobile
-        name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}-mobile
+        tag_name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}
+        name: v${{ env.RX_VERSION }}-${{ env.RX_SHA }}
         make_latest: true
         files: librpcsx-android-${{ matrix.abi }}-${{ matrix.arch }}.so
         body: |
