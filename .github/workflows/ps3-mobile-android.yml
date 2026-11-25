@@ -86,7 +86,10 @@ jobs:
         # Same version naming as upstream releases: the app compares the
         # release name with the core's own version string.
         RX_VERSION=`cat android/.rx.version | awk -F'-' '{print $1}'`
-        RX_SHA=`cat android/.rx.version | awk -F'-' '{print $5}'`
+        # .rx.version is date-tag-tagver-branch-rev-dirty and branch names can
+        # contain dashes, so take the commit the same way rx/CMakeLists.txt does
+        # (first 7 hex digits) rather than by field position.
+        RX_SHA=`git rev-parse HEAD | cut -c1-7`
         echo "RX_VERSION=$RX_VERSION" >> "$GITHUB_ENV"
         echo "RX_SHA=$RX_SHA" >> "$GITHUB_ENV"
 
