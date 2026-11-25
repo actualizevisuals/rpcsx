@@ -314,8 +314,30 @@ void VKGSRender::load_texture_env()
 
 				if (texture_format >= CELL_GCM_TEXTURE_DEPTH24_D8 && texture_format <= CELL_GCM_TEXTURE_DEPTH16_FLOAT)
 				{
-					compare_enabled = VK_TRUE;
-					depth_compare_mode = vk::get_compare_func(tex.zfunc(), true);
+					// Only enable comparison when the fragment shader samples with a shadow (Dref) lookup.
+					// This must match the shadow_textures mask built in rsx::thread::get_current_fragment_program.
+					// A compare-enabled sampler used by a plain lookup is undefined in Vulkan; desktop drivers
+					// ignore the compare, but some mobile drivers (e.g. ARM Mali) apply it and return 0 (black).
+					const auto compare_mode = tex.zfunc();
+					const bool shadow_lookup = sampler_state->format_class != RSX_FORMAT_CLASS_COLOR &&
+						!tex.alpha_kill_enabled() &&
+						compare_mode > rsx::comparison_function::never &&
+						compare_mode < rsx::comparison_function::always;
+
+					if (shadow_lookup)
+					{
+						compare_enabled = VK_TRUE;
+						depth_compare_mode = vk::get_compare_func(compare_mode, true);
+					}
+					else
+					{
+						static atomic_t<bool> s_reported = false;
+						if (!s_reported.exchange(true))
+						{
+							rsx_log.warning("Depth texture (format 0x%x, zfunc %d, class %d) is read without shadow comparison; sampler compare disabled to match the shader",
+								texture_format, static_cast<int>(compare_mode), static_cast<int>(sampler_state->format_class));
+						}
+					}
 				}
 
 				const f32 af_level = vk::max_aniso(tex.max_aniso());
