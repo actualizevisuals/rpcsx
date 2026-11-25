@@ -246,13 +246,19 @@ namespace vk
 		instance_info.ppEnabledExtensionNames = fast ? nullptr : extensions.data();
 		instance_info.pNext = next_info;
 
-		if (VkResult result = VK_GET_SYMBOL(vkCreateInstance)(&instance_info, nullptr, &m_instance); result != VK_SUCCESS)
+		VkResult result = VK_GET_SYMBOL(vkCreateInstance)(&instance_info, nullptr, &m_instance);
+		if (result == VK_ERROR_LAYER_NOT_PRESENT && std::erase(layers, std::string_view("VK_LAYER_KHRONOS_validation")))
 		{
-			if (result == VK_ERROR_LAYER_NOT_PRESENT)
-			{
-				rsx_log.fatal("Could not initialize layer VK_LAYER_KHRONOS_validation");
-			}
+			// The validation layer is rarely installed (never on Android); run without it
+			// rather than failing to find any GPU at all.
+			rsx_log.error("Could not initialize layer VK_LAYER_KHRONOS_validation; continuing without Vulkan validation");
+			instance_info.enabledLayerCount = static_cast<u32>(layers.size());
+			instance_info.ppEnabledLayerNames = layers.data();
+			result = VK_GET_SYMBOL(vkCreateInstance)(&instance_info, nullptr, &m_instance);
+		}
 
+		if (result != VK_SUCCESS)
+		{
 			return false;
 		}
 
