@@ -1835,7 +1835,9 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 
 		// Detect boot location
 		const std::string hdd0_game = vfs::get("/dev_hdd0/game/");
-		const bool from_hdd0_game = IsPathInsideDir(m_path, hdd0_game);
+		// An unresolved (empty) hdd0 path made every path look "inside" it, so disc games were
+		// "moved" to games/<their own absolute path>. Require a real, matching prefix.
+		const bool from_hdd0_game = !hdd0_game.empty() && m_path.starts_with(hdd0_game) && IsPathInsideDir(m_path, hdd0_game);
 
 		if (game_boot_result error = VerifyPathCasing(m_path, hdd0_game, from_hdd0_game); error != game_boot_result::no_errors)
 		{
@@ -1853,7 +1855,7 @@ game_boot_result Emulator::Load(const std::string& title_id, bool is_disc_patch,
 			std::string sfb_dir;
 			GetBdvdDir(bdvd_dir, sfb_dir, m_game_dir, elf_dir);
 
-			if (!sfb_dir.empty() && from_hdd0_game)
+			if (!sfb_dir.empty() && from_hdd0_game && sfb_dir.starts_with(hdd0_game))
 			{
 				// Booting disc game from wrong location
 				sys_log.error("Disc game %s found at invalid location /dev_hdd0/game/", m_title_id);
