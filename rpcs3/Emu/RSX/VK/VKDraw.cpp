@@ -1,4 +1,6 @@
 #include "stdafx.h"
+#include <mutex>
+#include <unordered_set>
 #include "../Common/BufferUtils.h"
 #include "../rsx_methods.h"
 
@@ -325,20 +327,33 @@ void VKGSRender::load_texture_env()
 				// Check the device properties to determine whether to pre-swizzle the colors or not.
 				const auto border_color = rsx::is_border_clamped_texture(tex) ? vk::border_color_t(get_border_color(tex)) : vk::border_color_t(VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK);
 
-				// Check if non-point filtering can even be used on this format
-				bool can_sample_linear;
-				if (sampler_state->format_class == RSX_FORMAT_CLASS_COLOR) [[likely]]
+				// Check if non-point filtering can even be used on this format.
+				// Desktop GPUs filter every PS3 format, but mobile GPUs (e.g. ARM Mali) can't
+				// linearly filter some color formats such as 32-bit float, and return black
+				// when asked to. RSX can't filter FP32 either, so nearest matches hardware.
+				VkFormat vk_format = VK_FORMAT_UNDEFINED;
+				if (sampler_state->image_handle)
 				{
-					// Most PS3-like formats can be linearly filtered without problem
-					can_sample_linear = true;
+					vk_format = sampler_state->image_handle->image()->format();
 				}
-				else
+				else if (sampler_state->format_class != RSX_FORMAT_CLASS_COLOR)
 				{
-					// Not all GPUs support linear filtering of depth formats
-					const auto vk_format = sampler_state->image_handle ? sampler_state->image_handle->image()->format() :
-					                                                     vk::get_compatible_sampler_format(m_device->get_formats_support(), sampler_state->external_subresource_desc.gcm_format);
+					vk_format = vk::get_compatible_sampler_format(m_device->get_formats_support(), sampler_state->external_subresource_desc.gcm_format);
+				}
 
-					can_sample_linear = m_device->get_format_properties(vk_format).optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+				// Unknown color formats keep the previous assumption (filterable).
+				const bool can_sample_linear = (vk_format == VK_FORMAT_UNDEFINED) ||
+					!!(m_device->get_format_properties(vk_format).optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+				if (!can_sample_linear && sampler_state->format_class == RSX_FORMAT_CLASS_COLOR)
+				{
+					static std::unordered_set<u32> s_reported_formats;
+					static std::mutex s_reported_mutex;
+					std::lock_guard lock(s_reported_mutex);
+					if (s_reported_formats.insert(static_cast<u32>(vk_format)).second)
+					{
+						rsx_log.warning("Linear filtering of color format %d (RSX format 0x%x) is not supported by this GPU; using nearest filtering",
+							static_cast<int>(vk_format), texture_format);
+					}
 				}
 
 				const auto mipmap_count = tex.get_exact_mipmap_count();
