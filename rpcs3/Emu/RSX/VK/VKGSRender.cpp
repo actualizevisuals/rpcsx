@@ -1916,7 +1916,10 @@ bool VKGSRender::load_program()
 				current_fp_metadata,
 				current_vertex_program.ctrl,
 				current_fragment_program.ctrl);
-			return true;
+
+			// The interpreter returns no program for draws that can't produce output
+			// (e.g. alpha test NEVER); those draws must be skipped, not executed.
+			return m_program != nullptr;
 		}
 	}
 

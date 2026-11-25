@@ -295,11 +295,17 @@ void write_output(const in int oid, const in int mask_bit)
 }
 
 // Cannot dynamically index into the gl_ClipDistance array without causing problems due to it's unknown size
+#ifdef _DISABLE_CLIP_DISTANCE
+// The host GPU has no shaderClipDistance (e.g. ARM Mali); user clip planes are ignored here.
+#define write_clip_distance(plane, mask_bit, test, value)
+#else
 #define write_clip_distance(plane, mask_bit, test, value)\
 	if (test && attribute_enabled(1 << mask_bit))\
 		gl_ClipDistance[plane] = value;\
 	else\
 		gl_ClipDistance[plane] = 0.5f;\
+
+#endif
 
 ivec4 read_addr_reg()
 {

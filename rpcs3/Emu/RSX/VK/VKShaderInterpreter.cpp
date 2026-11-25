@@ -56,6 +56,11 @@ namespace vk
 			builder << "#define _ENABLE_INSTANCED_CONSTANTS\n";
 		}
 
+		if (!vk::get_current_renderer()->get_clip_distance_support())
+		{
+			builder << "#define _DISABLE_CLIP_DISTANCE\n";
+		}
+
 		if (compiler_options)
 		{
 			builder << "\n";
