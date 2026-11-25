@@ -221,6 +221,18 @@ void VKGSRender::update_draw_state()
 
 		VK_GET_SYMBOL(vkCmdSetDepthBounds)(*m_current_command_buffer, bounds_min, bounds_max);
 	}
+	else if (rsx::method_registers.depth_bounds_test_enabled())
+	{
+		// Diagnostics: the test is silently dropped on GPUs without depthBounds (e.g. ARM Mali).
+		static u32 s_unsupported_depth_bounds_reports = 0;
+		if (s_unsupported_depth_bounds_reports < 20)
+		{
+			s_unsupported_depth_bounds_reports++;
+			rsx_log.error("Depth bounds test requested but not supported by this GPU (min=%f, max=%f, depth write=%d, stencil test=%d)",
+				rsx::method_registers.depth_bounds_min(), rsx::method_registers.depth_bounds_max(),
+				+rsx::method_registers.depth_write_enabled(), +rsx::method_registers.stencil_test_enabled());
+		}
+	}
 
 	bind_viewport();
 

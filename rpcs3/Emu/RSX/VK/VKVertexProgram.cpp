@@ -5,6 +5,7 @@
 #include "VKHelpers.h"
 #include "vkutils/device.h"
 #include "../Program/GLSLCommon.h"
+#include <atomic>
 
 std::string VKVertexDecompilerThread::getFloatTypeName(usz elementCount)
 {
@@ -342,6 +343,17 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream& OS)
 	}
 
 	OS << "	vs_main();\n\n";
+
+	if (m_device_props.emulate_clip_distance && (rsx_vertex_program.output_mask & (CELL_GCM_ATTRIB_OUTPUT_MASK_UC0 | CELL_GCM_ATTRIB_OUTPUT_MASK_UC1 |
+		CELL_GCM_ATTRIB_OUTPUT_MASK_UC2 | CELL_GCM_ATTRIB_OUTPUT_MASK_UC3 | CELL_GCM_ATTRIB_OUTPUT_MASK_UC4 | CELL_GCM_ATTRIB_OUTPUT_MASK_UC5)))
+	{
+		// Diagnostics: confirm games actually rely on user clip planes.
+		static std::atomic<u32> s_clip_reports{0};
+		if (s_clip_reports++ < 10)
+		{
+			rsx_log.warning("Emulating user clip planes for vertex program (output mask=0x%x)", rsx_vertex_program.output_mask);
+		}
+	}
 
 	if (m_device_props.emulate_clip_distance)
 	{
