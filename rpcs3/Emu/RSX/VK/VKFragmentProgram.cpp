@@ -5,6 +5,8 @@
 #include "vkutils/device.h"
 #include "Emu/system_config.h"
 #include "../Program/GLSLCommon.h"
+#include "util/StrUtil.h"
+#include <cstdlib>
 
 std::string VKFragmentDecompilerThread::getFloatTypeName(usz elementCount)
 {
@@ -433,8 +435,87 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	}
 }
 
+namespace
+{
+	// Debugging aid for GPU-specific rendering bugs (PS3 Mobile). If
+	// <config>/shader_debug.txt exists, each line may be:
+	//   magenta <ids>        e.g. "magenta 3,10-40": listed fragment programs output solid magenta
+	//   depth_float_as_unorm decode depth-as-color reads as UNORM24 instead of FLOAT24
+	//   depth_decode_zero    depth-as-color reads return 0.5 grey instead of decoded depth
+	// IDs match the FragmentProgram<id> files written by "Log shader programs".
+	struct shader_debug_config
+	{
+		std::vector<std::pair<u32, u32>> magenta;
+		bool depth_float_as_unorm = false;
+		bool depth_decode_zero = false;
+	};
+
+	shader_debug_config load_shader_debug_config()
+	{
+		shader_debug_config cfg;
+		const std::string text = fs::file(fs::get_config_dir() + "shader_debug.txt").to_string();
+		for (const std::string& raw_line : fmt::split(text, {"\n"}))
+		{
+			const std::string line = fmt::trim(raw_line, " \t\r");
+			if (line == "depth_float_as_unorm")
+				cfg.depth_float_as_unorm = true;
+			else if (line == "depth_decode_zero")
+				cfg.depth_decode_zero = true;
+			else if (line.starts_with("magenta "))
+			{
+				for (const std::string& range : fmt::split(line.substr(8), {","}))
+				{
+					const auto dash = range.find('-');
+					const u32 lo = static_cast<u32>(std::strtoul(range.c_str(), nullptr, 10));
+					const u32 hi = dash == umax ? lo : static_cast<u32>(std::strtoul(range.c_str() + dash + 1, nullptr, 10));
+					cfg.magenta.emplace_back(lo, hi);
+				}
+			}
+		}
+		return cfg;
+	}
+
+	bool replace_all(std::string& s, std::string_view from, std::string_view to)
+	{
+		bool changed = false;
+		for (usz pos = 0; (pos = s.find(from, pos)) != umax; pos += to.size())
+		{
+			s.replace(pos, from.size(), to);
+			changed = true;
+		}
+		return changed;
+	}
+}
+
 void VKFragmentProgram::Compile()
 {
+	if (fs::is_file(fs::get_config_dir() + "shader_debug.txt"))
+	{
+		const shader_debug_config cfg = load_shader_debug_config();
+		std::string source = shader.get_source();
+		bool changed = false;
+
+		if (cfg.depth_float_as_unorm)
+			changed |= replace_all(source, "if (!depth_float)", "if (true)");
+		if (cfg.depth_decode_zero)
+			changed |= replace_all(source, "vec4 result = decode_depth24(depth_stencil.x, _test_bit(flags, DEPTH_FLOAT));", "vec4 result = vec4(0.5);");
+
+		for (const auto& [lo, hi] : cfg.magenta)
+		{
+			if (id >= lo && id <= hi)
+			{
+				changed |= replace_all(source, "ocol0 = col0;", "ocol0 = vec4(1., 0., 1., 1.);");
+				break;
+			}
+		}
+
+		if (changed)
+		{
+			rsx_log.warning("shader_debug: modified fragment program %u", id);
+			shader.create(::glsl::program_domain::glsl_fragment_program, source);
+		}
+	}
+
 	if (g_cfg.video.log_programs)
 		fs::write_file(fs::get_cache_dir() + "shaderlog/FragmentProgram" + std::to_string(id) + ".spirv", fs::rewrite, shader.get_source());
 	handle = shader.compile();
