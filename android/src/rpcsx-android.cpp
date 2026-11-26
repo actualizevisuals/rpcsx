@@ -1,4 +1,5 @@
 #include "Crypto/unpkg.h"
+#include <fstream>
 #include "Crypto/unself.h"
 #include "Emu/Audio/Cubeb/CubebBackend.h"
 #include "Emu/Audio/Null/NullAudioBackend.h"
@@ -1711,6 +1712,77 @@ extern "C" bool _rpcsx_overlayPadData(int digital1, int digital2,
   return true;
 }
 
+// Pick the LLVM CPU the PPU/SPU recompilers generate code for. It used to be hard-coded to
+// cortex-a34 (ARMv8.0, 2016), which leaves out LSE atomics, dot product, FP16 and the rest of
+// the newer instruction sets every current phone has. Use the newest ISA level that *all* cores
+// support (big.LITTLE threads can migrate), falling back to the old baseline for unknown CPUs.
+static std::string pick_llvm_cpu() {
+  struct cpu_level {
+    int level;
+    const char *llvm_name;
+  };
+
+  // ARM Ltd. "CPU part" numbers from /proc/cpuinfo
+  auto level_of = [](unsigned implementer, unsigned part) -> int {
+    if (implementer != 0x41)
+      return 0;
+    switch (part) {
+    case 0xd03: case 0xd04: case 0xd07: case 0xd08: case 0xd09:
+      return 80; // A53, A35, A57, A72, A73
+    case 0xd05: case 0xd0a: case 0xd0b: case 0xd0d: case 0xd41:
+    case 0xd44: case 0xd4b: case 0xd4c:
+      return 82; // A55, A75, A76, A77, A78, X1, A78C, X1C
+    case 0xd46: case 0xd47: case 0xd48:
+      return 90; // A510, A710, X2
+    case 0xd4d: case 0xd4e:
+      return 90; // A715, X3 (ARMv9.0)
+    case 0xd80: case 0xd81: case 0xd82: case 0xd85: case 0xd87:
+      return 92; // A520, A720, X4, X925, A725
+    default:
+      return 0;
+    }
+  };
+
+  static const cpu_level targets[] = {
+      {92, "cortex-a720"},
+      {90, "cortex-a710"},
+      {82, "cortex-a55"},
+  };
+
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  std::string line;
+  unsigned implementer = 0;
+  int min_level = 1000;
+  bool any = false;
+
+  while (std::getline(cpuinfo, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos)
+      continue;
+    const unsigned long value = std::strtoul(line.c_str() + colon + 1, nullptr, 0);
+    if (line.starts_with("CPU implementer")) {
+      implementer = static_cast<unsigned>(value);
+    } else if (line.starts_with("CPU part")) {
+      min_level = std::min(min_level, level_of(implementer, static_cast<unsigned>(value)));
+      any = true;
+    }
+  }
+
+  const char *result = "cortex-a34";
+  if (any) {
+    for (const auto &t : targets) {
+      if (min_level >= t.level) {
+        result = t.llvm_name;
+        break;
+      }
+    }
+  }
+
+  rpcsx_android.notice("LLVM CPU target: %s (lowest core ISA level %d)", result, any ? min_level : -1);
+  return result;
+}
+
+
 extern "C" bool _rpcsx_initialize(std::string_view rootDir,
                                   std::string_view user) {
   auto rootDirStr = fix_dir_path(std::string(rootDir));
@@ -1815,7 +1887,7 @@ extern "C" bool _rpcsx_initialize(std::string_view rootDir,
   g_cfg_input.player1.device.from_string("Virtual");
   g_cfg_input.save("", g_cfg_input_configs.default_config);
 
-  g_cfg.core.llvm_cpu.from_string("cortex-a34");
+  g_cfg.core.llvm_cpu.from_string(pick_llvm_cpu());
 
   Emulator::SaveSettings(g_cfg.to_string(), Emu.GetTitleID());
   return true;
