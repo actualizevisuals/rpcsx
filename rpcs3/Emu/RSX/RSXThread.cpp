@@ -2432,7 +2432,8 @@ namespace rsx
 		}
 
 		zcull_ctrl->set_enabled(this, zcull_rendering_enabled);
-		zcull_ctrl->set_status(this, zcull_surface_active, zcull_pixel_cnt_enabled, zcull_stats_enabled);
+		// When occlusion queries are disabled their results are never read, so don't run them on the GPU either
+		zcull_ctrl->set_status(this, zcull_surface_active, zcull_pixel_cnt_enabled && !g_cfg.video.disable_zcull_queries, zcull_stats_enabled);
 	}
 
 	void thread::clear_zcull_stats(u32 type)
@@ -2460,6 +2461,14 @@ namespace rsx
 				rsx_log.error("Unknown zcull stat type %d", type);
 				break;
 			}
+		}
+
+		if (g_cfg.video.disable_zcull_queries && type == CELL_GCM_ZPASS_PIXEL_CNT)
+		{
+			// With occlusion queries disabled, report every object as visible rather than fully occluded.
+			// Reporting 0 makes games that occlusion-cull (e.g. Toy Story 3) skip drawing objects entirely,
+			// leaving depth-only black silhouettes. Reporting "visible" just turns the culling off.
+			value = u16{umax};
 		}
 
 		rsx::reservation_lock<true> lock(sink, 16);
