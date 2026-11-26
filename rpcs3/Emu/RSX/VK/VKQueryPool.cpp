@@ -7,6 +7,8 @@
 #include "rx/asm.hpp"
 #include "VKGSRender.h"
 
+#include <chrono>
+
 namespace vk
 {
 	inline bool query_pool_manager::poke_query(query_slot_info& query, u32 index, VkQueryResultFlags flags)
@@ -170,10 +172,26 @@ namespace vk
 		{
 			poke_query(query_info, index, result_flags);
 
+			// Never spin forever: a query the driver fails to complete would otherwise freeze the game.
+			// After a generous timeout, report the object as visible so it is still drawn.
+			const auto start = std::chrono::steady_clock::now();
 			while (!query_info.ready)
 			{
 				rx::pause();
 				poke_query(query_info, index, result_flags);
+
+				if (!query_info.ready && std::chrono::steady_clock::now() - start > std::chrono::seconds(2))
+				{
+					static atomic_t<u32> s_timeouts = 0;
+					if (s_timeouts++ < 8)
+					{
+						rsx_log.error("Occlusion query %u did not complete within 2s; treating it as visible", index);
+					}
+
+					query_info.any_passed = true;
+					query_info.ready = true;
+					query_info.data = 1;
+				}
 			}
 		}
 
@@ -184,6 +202,12 @@ namespace vk
 	{
 		// We're technically supposed to stop any active renderpasses before streaming the results out, but that doesn't matter on IMR hw
 		// On TBDR setups like the apple M series, the stop is required (results are all 0 if you don't flush the RP), but this introduces a very heavy performance loss.
+		// Drivers that need strict query scopes (e.g. ARM Mali) get the render pass closed here.
+		if (vk::use_strict_query_scopes() && vk::is_renderpass_open(cmd))
+		{
+			vk::end_renderpass(cmd);
+		}
+
 		VK_GET_SYMBOL(vkCmdCopyQueryPoolResults)(cmd, *query_slot_status[index].pool, index, count, dst, dst_offset, 4, VK_QUERY_RESULT_WAIT_BIT);
 	}
 

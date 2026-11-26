@@ -91,6 +91,8 @@ namespace vk
 		g_drv_sanitize_fp_values = false;
 		g_drv_disable_fence_reset = false;
 		g_drv_emulate_cond_render = (g_cfg.video.relaxed_zcull_sync && !g_render_device->get_conditional_render_support());
+		g_drv_strict_query_scopes = false;
+		g_drv_force_reuse_query_pools = false;
 		g_num_processed_frames = 0;
 		g_num_total_frames = 0;
 		g_heap_compatible_buffer_types = 0;
@@ -146,10 +148,32 @@ namespace vk
 			// Needs more testing
 			break;
 		case driver_vendor::ARM_MALI:
-			// Needs more testing
+			// Tile-based GPU: occlusion queries must not straddle render pass boundaries, and their
+			// results must be copied out with no render pass open. Otherwise results never become
+			// available (ZCULL reads hang the game) or come back as zero (conditional rendering then
+			// skips draws, leaving depth-only black silhouettes).
+			g_drv_strict_query_scopes = true;
 			break;
 		default:
 			rsx_log.warning("Unsupported device: %s", gpu_name);
+		}
+
+#ifdef ANDROID
+		// Manual overrides from the config file (these only add workarounds, never remove driver defaults)
+		{
+			const auto& wa = g_cfg.video.vk.workarounds;
+			g_drv_no_primitive_restart |= wa.no_primitive_restart.get();
+			g_drv_sanitize_fp_values |= wa.sanitize_fp_values.get();
+			g_drv_disable_fence_reset |= wa.disable_fence_reset.get();
+			g_drv_emulate_cond_render |= wa.emulate_cond_render.get();
+			g_drv_strict_query_scopes |= wa.strict_query_scopes.get();
+			g_drv_force_reuse_query_pools |= wa.force_reuse_query_pools.get();
+		}
+#endif
+
+		if (g_drv_strict_query_scopes)
+		{
+			rsx_log.notice("Vulkan: Using strict occlusion query scopes");
 		}
 
 		rsx_log.notice("Vulkan: Renderer initialized on device '%s'", gpu_name);
