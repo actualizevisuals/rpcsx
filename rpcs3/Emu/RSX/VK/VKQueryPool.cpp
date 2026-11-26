@@ -150,6 +150,15 @@ namespace vk
 		query_info.pool = m_current_query_pool.get();
 		query_info.active = true;
 
+		// Freed slots are handed out again within the same pool, but Vulkan requires a query to be reset
+		// before every reuse. Desktop drivers tolerate it; Mali keeps the stale availability and result, so
+		// reports read back early or as 0 and occlusion-culled objects flicker. The reset must happen outside
+		// a render pass, which strict query scopes already guarantee here.
+		if (vk::use_strict_query_scopes() && !vk::is_renderpass_open(cmd))
+		{
+			VK_GET_SYMBOL(vkCmdResetQueryPool)(cmd, *query_info.pool, index, 1);
+		}
+
 		VK_GET_SYMBOL(vkCmdBeginQuery)(cmd, *query_info.pool, index, control_flags);
 	}
 
