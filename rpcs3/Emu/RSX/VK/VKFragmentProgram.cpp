@@ -441,6 +441,7 @@ namespace
 	// <config>/shader_debug.txt exists, each line may be:
 	//   magenta <ids>        e.g. "magenta 3,10-40": listed fragment programs output solid magenta
 	//   magenta_hash <hashes> comma-separated 16-digit hex hashes of the generated source (stable across runs)
+	//   replace <hash|*> <from>@@<to>  literal text substitution in matching programs' source
 	//   depth_float_as_unorm decode depth-as-color reads as UNORM24 instead of FLOAT24
 	//   depth_decode_zero    depth-as-color reads return 0.5 grey instead of decoded depth
 	// IDs match the FragmentProgram<id> files written by "Log shader programs".
@@ -448,6 +449,8 @@ namespace
 	{
 		std::vector<std::pair<u32, u32>> magenta;
 		std::vector<u64> magenta_hash;
+		struct replacement { bool any; u64 hash; std::string from, to; };
+		std::vector<replacement> replacements;
 		bool depth_float_as_unorm = false;
 		bool depth_decode_zero = false;
 	};
@@ -463,6 +466,18 @@ namespace
 				cfg.depth_float_as_unorm = true;
 			else if (line == "depth_decode_zero")
 				cfg.depth_decode_zero = true;
+			else if (line.starts_with("replace "))
+			{
+				const std::string rest = line.substr(8);
+				const auto space = rest.find(' ');
+				const auto sep = rest.find("@@");
+				if (space != umax && sep != umax && sep > space)
+				{
+					const std::string key = rest.substr(0, space);
+					cfg.replacements.push_back({key == "*", key == "*" ? 0 : std::strtoull(key.c_str(), nullptr, 16),
+						rest.substr(space + 1, sep - space - 1), rest.substr(sep + 2)});
+				}
+			}
 			else if (line.starts_with("magenta_hash "))
 			{
 				for (const std::string& h : fmt::split(line.substr(13), {","}))
@@ -514,6 +529,12 @@ void VKFragmentProgram::Compile()
 		const shader_debug_config cfg = load_shader_debug_config();
 		std::string source = shader.get_source();
 		bool changed = false;
+
+		for (const auto& r : cfg.replacements)
+		{
+			if ((r.any || r.hash == source_hash) && !r.from.empty())
+				changed |= replace_all(source, r.from, r.to);
+		}
 
 		if (std::find(cfg.magenta_hash.begin(), cfg.magenta_hash.end(), source_hash) != cfg.magenta_hash.end())
 			changed |= replace_all(source, "ocol0 = col0;", "ocol0 = vec4(1., 0., 1., 1.);");
