@@ -440,12 +440,14 @@ namespace
 	// Debugging aid for GPU-specific rendering bugs (PS3 Mobile). If
 	// <config>/shader_debug.txt exists, each line may be:
 	//   magenta <ids>        e.g. "magenta 3,10-40": listed fragment programs output solid magenta
+	//   magenta_hash <hashes> comma-separated 16-digit hex hashes of the generated source (stable across runs)
 	//   depth_float_as_unorm decode depth-as-color reads as UNORM24 instead of FLOAT24
 	//   depth_decode_zero    depth-as-color reads return 0.5 grey instead of decoded depth
 	// IDs match the FragmentProgram<id> files written by "Log shader programs".
 	struct shader_debug_config
 	{
 		std::vector<std::pair<u32, u32>> magenta;
+		std::vector<u64> magenta_hash;
 		bool depth_float_as_unorm = false;
 		bool depth_decode_zero = false;
 	};
@@ -461,6 +463,11 @@ namespace
 				cfg.depth_float_as_unorm = true;
 			else if (line == "depth_decode_zero")
 				cfg.depth_decode_zero = true;
+			else if (line.starts_with("magenta_hash "))
+			{
+				for (const std::string& h : fmt::split(line.substr(13), {","}))
+					cfg.magenta_hash.push_back(std::strtoull(h.c_str(), nullptr, 16));
+			}
 			else if (line.starts_with("magenta "))
 			{
 				for (const std::string& range : fmt::split(line.substr(8), {","}))
@@ -473,6 +480,17 @@ namespace
 			}
 		}
 		return cfg;
+	}
+
+	u64 fnv1a64(std::string_view text)
+	{
+		u64 h = 0xcbf29ce484222325ull;
+		for (const char c : text)
+		{
+			h ^= static_cast<u8>(c);
+			h *= 0x100000001b3ull;
+		}
+		return h;
 	}
 
 	bool replace_all(std::string& s, std::string_view from, std::string_view to)
@@ -489,11 +507,16 @@ namespace
 
 void VKFragmentProgram::Compile()
 {
+	const u64 source_hash = fnv1a64(shader.get_source());
+
 	if (fs::is_file(fs::get_config_dir() + "shader_debug.txt"))
 	{
 		const shader_debug_config cfg = load_shader_debug_config();
 		std::string source = shader.get_source();
 		bool changed = false;
+
+		if (std::find(cfg.magenta_hash.begin(), cfg.magenta_hash.end(), source_hash) != cfg.magenta_hash.end())
+			changed |= replace_all(source, "ocol0 = col0;", "ocol0 = vec4(1., 0., 1., 1.);");
 
 		if (cfg.depth_float_as_unorm)
 			changed |= replace_all(source, "if (!depth_float)", "if (true)");
@@ -511,13 +534,13 @@ void VKFragmentProgram::Compile()
 
 		if (changed)
 		{
-			rsx_log.warning("shader_debug: modified fragment program %u", id);
+			rsx_log.warning("shader_debug: modified fragment program %u (hash %016x)", id, source_hash);
 			shader.create(::glsl::program_domain::glsl_fragment_program, source);
 		}
 	}
 
 	if (g_cfg.video.log_programs)
-		fs::write_file(fs::get_cache_dir() + "shaderlog/FragmentProgram" + std::to_string(id) + ".spirv", fs::rewrite, shader.get_source());
+		fs::write_file(fs::get_cache_dir() + "shaderlog/FragmentProgram" + std::to_string(id) + "_" + fmt::format("%016x", source_hash) + ".spirv", fs::rewrite, shader.get_source());
 	handle = shader.compile();
 }
 
