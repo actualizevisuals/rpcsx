@@ -953,7 +953,7 @@ void VKGSRender::emit_geometry(u32 sub_index)
 		update_draw_state();
 		begin_render_pass();
 
-		if (cond_render_ctrl.hw_cond_active && m_device->get_conditional_render_support())
+		if (cond_render_ctrl.hw_cond_active && m_device->get_conditional_render_support() && !vk::emulate_conditional_rendering())
 		{
 			// It is inconvenient that conditional rendering breaks other things like compute dispatch
 			// TODO: If this is heavy, add refactor the resources into global and add checks around compute dispatch

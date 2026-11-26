@@ -3024,6 +3024,31 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 	usz first = 0;
 	usz last = (!partial_eval) ? sources.size() : 1;
 
+	// A query must be ended before its result can be copied. If one of the sources is still recording,
+	// close its open segment now; the next draw opens a new segment for the same report. Copying an
+	// active query is undefined: desktop drivers return the partial count, Mali returns 0, which makes
+	// conditionally rendered objects randomly vanish.
+	if (vk::use_strict_query_scopes() && m_active_query_info &&
+		(m_current_command_buffer->flags & vk::command_buffer::cb_has_open_query))
+	{
+		for (usz i = first; i < last; ++i)
+		{
+			if (sources[i] != m_active_query_info)
+			{
+				continue;
+			}
+
+			if (vk::is_renderpass_open(*m_current_command_buffer))
+			{
+				vk::end_renderpass(*m_current_command_buffer);
+			}
+
+			emergency_query_cleanup(m_current_command_buffer);
+			m_current_command_buffer->flags |= vk::command_buffer::cb_load_occluson_task;
+			break;
+		}
+	}
+
 	// Count number of queries available. This is an "opening" evaluation, if there is only one source, read it as-is.
 	// The idea is to avoid scheduling a compute task unless we have to.
 	for (usz i = first; i < last; ++i)
@@ -3032,7 +3057,7 @@ void VKGSRender::begin_conditional_rendering(const std::vector<rsx::reports::occ
 		num_hw_queries += ::size32(query_info.indices);
 	}
 
-	if (m_device->get_conditional_render_support())
+	if (m_device->get_conditional_render_support() && !vk::emulate_conditional_rendering())
 	{
 		dst_stage = VK_PIPELINE_STAGE_CONDITIONAL_RENDERING_BIT_EXT;
 		dst_access = VK_ACCESS_CONDITIONAL_RENDERING_READ_BIT_EXT;
