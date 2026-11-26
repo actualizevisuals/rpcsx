@@ -638,7 +638,10 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 	// Conditional rendering support
 	// Do not use on MVK due to a speedhack we rely on (streaming results without stopping the current renderpass)
 	// If we break the renderpasses, MVK loses around 75% of its performance in troublesome spots compared to just doing a CPU sync
-	backend_config.supports_hw_conditional_render = (vk::get_driver_vendor() != vk::driver_vendor::MVK);
+	// Do not use on ARM Mali either: GPU-side evaluation there drops random occlusion-tested objects (they
+	// flicker black). Evaluate those conditions on the CPU from completed query results instead.
+	backend_config.supports_hw_conditional_render = (vk::get_driver_vendor() != vk::driver_vendor::MVK) &&
+		(vk::get_driver_vendor() != vk::driver_vendor::ARM_MALI);
 
 	// Passthrough DMA
 	backend_config.supports_passthrough_dma = m_device->get_external_memory_host_support();
