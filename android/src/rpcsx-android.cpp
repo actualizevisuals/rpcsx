@@ -15,6 +15,7 @@
 #include "Emu/Io/pad_config_types.h"
 #include "Emu/RSX/Null/NullGSRender.h"
 #include "Emu/RSX/Overlays/overlay_manager.h"
+#include "Emu/RSX/Overlays/overlay_perf_metrics.h"
 #include "Emu/RSX/Overlays/overlay_save_dialog.h"
 #include "Emu/RSX/Overlays/overlay_trophy_notification.h"
 #include "Emu/RSX/RSXThread.h"
@@ -2691,6 +2692,12 @@ extern "C" bool _rpcsx_settingsSet(std::string_view path,
   }
 
   Emulator::SaveSettings(g_cfg.to_string(), "");
+
+  // The performance overlay is only set up when the renderer starts; apply changes to it right away
+  if (!Emu.IsStopped() && path.starts_with("@@Video@@Performance Overlay")) {
+    rsx::overlays::reset_performance_overlay();
+  }
+
   return true;
 }
 
