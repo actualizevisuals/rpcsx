@@ -12,6 +12,8 @@
 #include "util/JIT.h"
 #include <thread>
 #include <cfenv>
+#include <algorithm>
+#include <fstream>
 
 #ifdef ARCH_ARM64
 #include "Emu/CPU/Backends/AArch64/AArch64Signal.h"
@@ -2901,6 +2903,47 @@ u64 thread_ctrl::get_affinity_mask(thread_class group)
 			g_cfg.core.affinity.cpu5.get(),
 			g_cfg.core.affinity.cpu6.get(),
 			g_cfg.core.affinity.cpu7.get()};
+
+	// If every core is left on "General", keep PPU/SPU threads off the slowest (efficiency) cluster on
+	// big.LITTLE phones: work bursts landing on a little core cause long hitches before the scheduler
+	// migrates them. The little cores are given to the RSX thread instead. Manual settings win.
+	if (std::all_of(std::begin(affinities), std::end(affinities), [](thread_class c) { return c == thread_class::general; }))
+	{
+		static const auto little_cores = []()
+		{
+			constexpr usz max_cpus = 8;
+			u64 freq[max_cpus]{};
+			const usz count = std::min<usz>(std::thread::hardware_concurrency(), max_cpus);
+			u64 fastest = 0;
+
+			for (usz i = 0; i < count; i++)
+			{
+				std::ifstream f("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cpufreq/cpuinfo_max_freq");
+				if (!(f >> freq[i]))
+					freq[i] = 0;
+				fastest = std::max(fastest, freq[i]);
+			}
+
+			u64 result = 0;
+			usz fast = 0;
+			for (usz i = 0; i < count; i++)
+			{
+				if (freq[i] && freq[i] * 10 < fastest * 8)
+					result |= 1ull << i;
+				else
+					fast++;
+			}
+
+			// Only worth it with enough fast cores left for the PPU and SPU threads
+			return (fast >= 4 && result) ? result : 0;
+		}();
+
+		for (usz i = 0; i < std::size(affinities); i++)
+		{
+			if (little_cores & (1ull << i))
+				affinities[i] = thread_class::rsx;
+		}
+	}
 
 	for (std::size_t i = 0; i < std::min<std::size_t>(std::thread::hardware_concurrency(), std::size(affinities)); ++i)
 	{
