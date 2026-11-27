@@ -1461,7 +1461,15 @@ static void setupCallbacks() {
           [](auto...) {
             ensure(g_fxo->init<named_thread<pad_thread>>(nullptr, nullptr, ""));
           },
-      .update_emu_settings = [](auto...) {},
+      .update_emu_settings =
+          [](auto...) {
+            // Settings changed from the PS home menu: apply the ones that
+            // only take effect when the renderer starts. Called from the
+            // overlay input thread, so do it off-thread to avoid re-entering
+            // the overlay manager while a menu is handling input.
+            std::thread([] { rsx::overlays::reset_performance_overlay(); })
+                .detach();
+          },
       .save_emu_settings =
           [](auto...) {
             Emulator::SaveSettings(g_cfg.to_string(), Emu.GetTitleID());
